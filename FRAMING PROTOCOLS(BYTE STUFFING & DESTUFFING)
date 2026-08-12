@@ -1,0 +1,460 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#define MAX_BYTES   500
+#define MAX_FRAMES  50
+#define MAX_INFO_BITS 2000
+#define MAX_INPUT_LEN (MAX_BYTES * 8 + 10)
+#define FILENAME    "byteframe.dat"
+#define FLAG_BYTE   "01111110"
+#define ADDRESS     "11111111"
+#define CONTROL     "00000000"
+#define PROTOCOL    "0000000000100001"
+#define FCS         "00000000000000000000000000000000"
+#define ESC_BYTE    "01111101"
+#define FLAG_LEN    8
+#define ADDR_LEN    8
+#define CTRL_LEN    8
+#define PROTO_LEN   16
+#define FCS_LEN     32
+#define ENDFLAG_LEN 8
+typedef struct
+{
+    char flag[9];
+    char address[9];
+    char control[9];
+    char protocol[17];
+    char information[1000];
+    char fcs[33];
+    char endflag[9];
+} PPP_Frame;
+void byteStuffing(char data[][9], int totalBytes, int numFrames);
+void byteDestuffing(void);
+void displayFrames(void);
+int parseFrame(char *line, PPP_Frame *frame);
+void stuffInformation(char bytesArr[][9], int numBytes, char *output);
+void destuffInformation(char *infoBits, char *output);
+int isValidByte(char *byte);
+int isValidBinaryString(char *str, int expectedLen);
+void printBytes(char *bits);
+
+#include "byte.h"
+
+int isValidByte(char *byte)
+{
+    int i;
+    int len = strlen(byte);
+
+    if (len != 8)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < 8; i++)
+    {
+        if (byte[i] != '0' && byte[i] != '1')
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int isValidBinaryString(char *str, int expectedLen)
+{
+    int i;
+    int len = strlen(str);
+
+    if (len != expectedLen)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < len; i++)
+    {
+        if (str[i] != '0' && str[i] != '1')
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void printBytes(char *bits)
+{
+    int len = strlen(bits);
+    int i;
+    char chunk[9];
+
+    for (i = 0; i < len; i += 8)
+    {
+        strncpy(chunk, &bits[i], 8);
+        chunk[8] = '\0';
+        printf("%s", chunk);
+        if (i + 8 < len)
+        {
+            printf(" ");
+        }
+    }
+    printf("\n");
+}
+
+void stuffInformation(char bytesArr[][9], int numBytes, char *output)
+{
+    int i, j = 0;
+
+    for (i = 0; i < numBytes; i++)
+    {
+        if (strcmp(bytesArr[i], FLAG_BYTE) == 0 || strcmp(bytesArr[i], ESC_BYTE) == 0)
+        {
+            strcpy(&output[j], ESC_BYTE);
+            j += 8;
+        }
+        strcpy(&output[j], bytesArr[i]);
+        j += 8;
+    }
+    output[j] = '\0';
+}
+
+void destuffInformation(char *infoBits, char *output)
+{
+    int len = strlen(infoBits);
+    int i = 0, j = 0;
+    char chunk[9];
+
+    while (i < len)
+    {
+        strncpy(chunk, &infoBits[i], 8);
+        chunk[8] = '\0';
+
+        if (strcmp(chunk, ESC_BYTE) == 0)
+        {
+            i += 8;
+            if (i + 8 <= len)
+            {
+                strncpy(&output[j], &infoBits[i], 8);
+                j += 8;
+                i += 8;
+            }
+        }
+        else
+        {
+            strncpy(&output[j], chunk, 8);
+            j += 8;
+            i += 8;
+        }
+    }
+    output[j] = '\0';
+}
+
+void byteStuffing(char data[][9], int totalBytes, int numFrames)
+{
+    int bytesPerFrame;
+    int i, f;
+    char frameBytes[MAX_BYTES][9];
+    char stuffedInfo[MAX_INFO_BITS];
+    PPP_Frame frame;
+    FILE *fp;
+
+    if (numFrames <= 0 || totalBytes <= 0 || totalBytes % numFrames != 0)
+    {
+        printf("Error: Total bytes is not divisible by number of frames.\n");
+        return;
+    }
+
+    bytesPerFrame = totalBytes / numFrames;
+
+    fp = fopen(FILENAME, "w");
+    if (fp == NULL)
+    {
+        printf("Error: Could not open file for writing.\n");
+        return;
+    }
+
+    for (f = 0; f < numFrames; f++)
+    {
+        for (i = 0; i < bytesPerFrame; i++)
+        {
+            strcpy(frameBytes[i], data[f * bytesPerFrame + i]);
+        }
+
+        stuffInformation(frameBytes, bytesPerFrame, stuffedInfo);
+
+        if (strlen(stuffedInfo) >= sizeof(frame.information))
+        {
+            printf("Error: Stuffed information for Frame %d exceeds capacity. Skipped.\n", f + 1);
+            continue;
+        }
+
+        strcpy(frame.flag, FLAG_BYTE);
+        strcpy(frame.address, ADDRESS);
+        strcpy(frame.control, CONTROL);
+        strcpy(frame.protocol, PROTOCOL);
+        strcpy(frame.information, stuffedInfo);
+        strcpy(frame.fcs, FCS);
+        strcpy(frame.endflag, FLAG_BYTE);
+
+        fprintf(fp, "%s%s%s%s%s%s%s\n",
+                frame.flag, frame.address, frame.control, frame.protocol,
+                frame.information, frame.fcs, frame.endflag);
+
+        printf("\nData %d:\n", f + 1);
+        printf("Original Data : ");
+        for (i = 0; i < bytesPerFrame; i++)
+        {
+            printf("%s", frameBytes[i]);
+            if (i < bytesPerFrame - 1)
+            {
+                printf(" ");
+            }
+        }
+        printf("\n");
+        printf("Stuffed Data   : ");
+        printBytes(stuffedInfo);
+    }
+
+    fclose(fp);
+    printf("\nAll %d frame(s) written successfully to \"%s\".\n", numFrames, FILENAME);
+}
+
+int parseFrame(char *line, PPP_Frame *frame)
+{
+    int len = strlen(line);
+    int fixedLen = FLAG_LEN + ADDR_LEN + CTRL_LEN + PROTO_LEN + FCS_LEN + ENDFLAG_LEN;
+    int infoLen;
+    int i;
+    int infoStart, fcsStart, endflagStart;
+
+    if (len < fixedLen)
+    {
+        return -1;
+    }
+
+    for (i = 0; i < FLAG_LEN; i++)
+        frame->flag[i] = line[i];
+    frame->flag[FLAG_LEN] = '\0';
+
+    for (i = 0; i < ADDR_LEN; i++)
+        frame->address[i] = line[FLAG_LEN + i];
+    frame->address[ADDR_LEN] = '\0';
+
+    for (i = 0; i < CTRL_LEN; i++)
+        frame->control[i] = line[FLAG_LEN + ADDR_LEN + i];
+    frame->control[CTRL_LEN] = '\0';
+
+    for (i = 0; i < PROTO_LEN; i++)
+        frame->protocol[i] = line[FLAG_LEN + ADDR_LEN + CTRL_LEN + i];
+    frame->protocol[PROTO_LEN] = '\0';
+
+    endflagStart = len - ENDFLAG_LEN;
+    fcsStart     = endflagStart - FCS_LEN;
+
+    for (i = 0; i < FCS_LEN; i++)
+        frame->fcs[i] = line[fcsStart + i];
+    frame->fcs[FCS_LEN] = '\0';
+
+    for (i = 0; i < ENDFLAG_LEN; i++)
+        frame->endflag[i] = line[endflagStart + i];
+    frame->endflag[ENDFLAG_LEN] = '\0';
+
+    infoStart = FLAG_LEN + ADDR_LEN + CTRL_LEN + PROTO_LEN;
+    infoLen   = fcsStart - infoStart;
+
+    if (infoLen < 0 || infoLen >= (int)sizeof(frame->information))
+    {
+        return -1;
+    }
+
+    for (i = 0; i < infoLen; i++)
+        frame->information[i] = line[infoStart + i];
+    frame->information[infoLen] = '\0';
+
+    return 0;
+}
+
+void byteDestuffing(void)
+{
+    FILE *fp;
+    char line[3000];
+    char combined[MAX_INFO_BITS * MAX_FRAMES];
+    char destuffedInfo[MAX_INFO_BITS];
+    PPP_Frame frame;
+    int len, frameNo = 1;
+
+    combined[0] = '\0';
+
+    fp = fopen(FILENAME, "r");
+    if (fp == NULL)
+    {
+        printf("Error: File \"%s\" not found. Please perform Byte Stuffing first.\n", FILENAME);
+        return;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL)
+    {
+        len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n')
+        {
+            line[len - 1] = '\0';
+        }
+
+        if (parseFrame(line, &frame) != 0)
+        {
+            printf("Error: Malformed frame encountered. Skipping.\n");
+            continue;
+        }
+
+        destuffInformation(frame.information, destuffedInfo);
+
+        printf("\nData %d:\n", frameNo++);
+        printf("Original Data: ");
+        printBytes(destuffedInfo);
+
+        strcat(combined, destuffedInfo);
+    }
+
+    fclose(fp);
+
+    printf("\nCombined Original Data: ");
+    printBytes(combined);
+}
+void displayFrames(void)
+{
+    FILE *fp;
+    char line[3000];
+    int len, frameNo = 1;
+
+    fp = fopen(FILENAME, "r");
+    if (fp == NULL)
+    {
+        printf("Error: File \"%s\" not found. Please perform Byte Stuffing first.\n", FILENAME);
+        return;
+    }
+
+    printf("\n--- Stored Frames in \"%s\" ---\n", FILENAME);
+
+    while (fgets(line, sizeof(line), fp) != NULL)
+    {
+        len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n')
+        {
+            line[len - 1] = '\0';
+        }
+
+        if (strlen(line) == 0)
+        {
+            continue;   /* skip blank lines */
+        }
+
+        printf("Frame %d: %s\n", frameNo++, line);
+    }
+
+    fclose(fp);
+
+    if (frameNo == 1)
+    {
+        printf("No frames found in the file.\n");
+    }
+}
+
+#include "byte.h"
+
+int main(void)
+{
+    int choice;
+    int totalBytes, numFrames;
+    char data[MAX_BYTES][9];
+    char rawInput[MAX_INPUT_LEN];
+    int i;
+
+    while (1)
+    {
+        printf("\n=====Byte Stuffing / Byte Destuffing =====\n");
+        printf("1. Byte Stuffing\n");
+        printf("2. Byte Destuffing\n");
+        printf("3. Display Frames\n");
+        printf("4. Exit\n");
+        printf("Enter your choice: ");
+
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
+            printf("Invalid input. Please enter a number.\n");
+            continue;
+        }
+
+        switch (choice)
+        {
+        case 1:
+            printf("Enter Total Number of Bytes: ");
+            scanf("%d", &totalBytes);
+
+            printf("Enter Number of Frames: ");
+            scanf("%d", &numFrames);
+
+            if (numFrames <= 0 || totalBytes <= 0 || totalBytes % numFrames != 0)
+            {
+                printf("Error: Total bytes is not divisible by number of frames.\n");
+                break;
+            }
+
+            if (totalBytes > MAX_BYTES)
+            {
+                printf("Error: Total bytes exceeds maximum supported size (%d).\n", MAX_BYTES);
+                break;
+            }
+
+            if (numFrames > MAX_FRAMES)
+            {
+                printf("Error: Number of frames exceeds maximum supported (%d).\n", MAX_FRAMES);
+                break;
+            }
+
+            printf("Enter Binary Data (%d bits total): ", totalBytes * 8);
+            scanf("%s", rawInput);
+
+            if (!isValidBinaryString(rawInput, totalBytes * 8))
+            {
+                printf("Error: Input must be exactly %d binary digits (0 or 1), no spaces.\n", totalBytes * 8);
+                break;
+            }
+
+            for (i = 0; i < totalBytes; i++)
+            {
+                strncpy(data[i], &rawInput[i * 8], 8);
+                data[i][8] = '\0';
+
+                if (!isValidByte(data[i]))
+                {
+                    printf("Error: Invalid byte detected at position %d.\n", i + 1);
+                    break;
+                }
+            }
+            if (i < totalBytes)
+            {
+                break;
+            }
+
+            byteStuffing(data, totalBytes, numFrames);
+            break;
+
+        case 2:
+            byteDestuffing();
+            break;
+
+        case 3:
+            displayFrames();
+            break;
+
+        case 4:
+            printf("Exiting program. \n");
+            exit(0);
+
+        default:
+            printf("Invalid choice. Please select 1, 2, 3, or 4.\n");
+        }
+    }
+
+    return 0;
+}
