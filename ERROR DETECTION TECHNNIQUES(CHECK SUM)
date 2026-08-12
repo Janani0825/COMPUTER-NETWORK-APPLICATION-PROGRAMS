@@ -1,0 +1,313 @@
+#ifndef HEAD_H
+#define HEAD_H
+
+#define MAX_SIZE    500
+#define BLOCK_SIZE  8
+#define MAX_CHECKSUM 0xFF
+#define RECEIVED_FILE "received.txt"
+
+typedef struct
+{
+    char message[MAX_SIZE];
+    int  words[MAX_SIZE];
+    int  count;
+    int  checksum;
+    int  type;
+} Packet;
+
+void clearInputBuffer(void);
+int  readInt(const char *prompt, int min, int max);
+void printSeparator(void);
+
+int  binaryToDecimal(const char *binaryStr);
+void createPacket(Packet *p);
+void generateChecksum(Packet *p);
+void displayPacket(const Packet *p);
+void writePacketToFile(const Packet *p);
+void checkChecksum(const Packet *sentPacket);
+#endif
+
+#include <stdio.h>
+#include <string.h>
+#include "sum.h"
+
+void clearInputBuffer(void)
+{
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) { }
+}
+
+int readInt(const char *prompt, int min, int max)
+{
+    char buffer[100];
+    int value = 0;
+    int valid = 0;
+    do
+    {
+        printf("%s", prompt);
+        if (fgets(buffer, sizeof(buffer), stdin) == NULL) continue;
+        if (sscanf(buffer, "%d", &value) == 1 && value >= min && value <= max)
+            valid = 1;
+        else
+            printf("Invalid input. Please enter a number between %d and %d.\n", min, max);
+    } while (!valid);
+    return value;
+}
+
+void printSeparator(void)
+{
+    printf("==============================\n");
+}
+
+int binaryToDecimal(const char *binaryStr)
+{
+    int decimalValue = 0;
+    int i;
+    for (i = 0; binaryStr[i] != '\0'; i++)
+        decimalValue = decimalValue * 2 + (binaryStr[i] - '0');
+    return decimalValue;
+}
+
+void createPacket(Packet *p)
+{
+    char inputBuffer[MAX_SIZE];
+    int len, i, j;
+
+    p->count = 0;
+    p->checksum = 0;
+    p->type = 2;
+    memset(p->message, 0, MAX_SIZE);
+    memset(p->words, 0, sizeof(p->words));
+
+    printf("\n---- Sender Menu ----\n");
+    printf("Enter binary data (0s and 1s only): ");
+    fgets(inputBuffer, MAX_SIZE, stdin);
+    inputBuffer[strcspn(inputBuffer, "\n")] = '\0';
+
+    len = (int)strlen(inputBuffer);
+    if (len == 0)
+    {
+        printf("Error: Input cannot be empty.\n");
+        // Provide a safe default
+        strcpy(p->message, "0");
+        p->words[0] = 0;
+        p->count = 1;
+        return;
+    }
+
+    for (i = 0; i < len; i++)
+    {
+        if (inputBuffer[i] != '0' && inputBuffer[i] != '1')
+        {
+            printf("Error: Invalid character '%c'. Only 0 and 1 are allowed.\n", inputBuffer[i]);
+            // Safe fallback
+            strcpy(p->message, "0");
+            p->words[0] = 0;
+            p->count = 1;
+            return;
+        }
+    }
+
+    strcpy(p->message, inputBuffer);
+
+    int wordIndex = 0;
+    for (i = 0; i < len; i += BLOCK_SIZE)
+    {
+        char block[BLOCK_SIZE + 1];
+        for (j = 0; j < BLOCK_SIZE; j++)
+        {
+            if (i + j < len)
+                block[j] = inputBuffer[i + j];
+            else
+                block[j] = '0';
+        }
+        block[BLOCK_SIZE] = '\0';
+        p->words[wordIndex] = binaryToDecimal(block);
+        wordIndex++;
+    }
+    p->count = wordIndex;
+
+    printf("\nOriginal Binary Data: %s\n", p->message);
+    printf("8-bit Decimal Values: ");
+    for (i = 0; i < p->count; i++)
+        printf("%d ", p->words[i]);
+    printf("\n");
+}
+
+void generateChecksum(Packet *p)
+{
+    int sum = 0, carry, i;
+
+    printf("\n---- Checksum Generation (Sender Side) ----\n");
+    for (i = 0; i < p->count; i++)
+        sum += p->words[i];
+    printf("Intermediate Sum: %d\n", sum);
+
+    while (sum > MAX_CHECKSUM)
+    {
+        carry = sum >> BLOCK_SIZE;
+        sum = (sum & MAX_CHECKSUM) + carry;
+        printf("End Around Carry applied -> Sum: %d\n", sum);
+    }
+
+    p->checksum = (~sum) & MAX_CHECKSUM;
+    printf("Generated Checksum: %d\n", p->checksum);
+}
+
+void displayPacket(const Packet *p)
+{
+    int i;
+    printSeparator();
+    printf("PACKET DETAILS\n");
+    printSeparator();
+    printf("Type    : Binary\n");
+    printf("Message : %s\n", p->message);
+    printf("Words   : ");
+    for (i = 0; i < p->count; i++)
+        printf("%d ", p->words[i]);
+    printf("\n");
+    printf("Checksum: %d\n", p->checksum);
+    printSeparator();
+}
+
+void writePacketToFile(const Packet *p)
+{
+    FILE *fp;
+    int i;
+
+    fp = fopen(RECEIVED_FILE, "w");
+    if (fp == NULL)
+    {
+        printf("Error: Could not create '%s'.\n", RECEIVED_FILE);
+        return;
+    }
+
+    fprintf(fp, "%d\n", p->count);
+    for (i = 0; i < p->count; i++)
+        fprintf(fp, "%d ", p->words[i]);
+    fprintf(fp, "\n%d\n", p->checksum);
+
+    fclose(fp);
+
+    printf("\nPacket data written to '%s'.\n", RECEIVED_FILE);
+}
+
+void checkChecksum(const Packet *sentPacket)
+{
+    FILE *fp;
+    int receivedWords[MAX_SIZE];
+    int receivedChecksum, receivedCount;
+    int sum = 0, carry, i;
+
+    (void)sentPacket;
+
+    printf("\n---- Receiver Side ----\n");
+    printf("Reading received packet from file: %s\n", RECEIVED_FILE);
+
+    fp = fopen(RECEIVED_FILE, "r");
+    if (fp == NULL)
+    {
+        printf("Error: File '%s' not found. Please run Sender first to generate it.\n", RECEIVED_FILE);
+        return;
+    }
+
+    if (fscanf(fp, "%d", &receivedCount) != 1 || receivedCount <= 0 || receivedCount > MAX_SIZE)
+    {
+        printf("Error: Invalid word count in file.\n");
+        fclose(fp);
+        return;
+    }
+
+    for (i = 0; i < receivedCount; i++)
+    {
+        if (fscanf(fp, "%d", &receivedWords[i]) != 1)
+        {
+            printf("Error: Not enough words in file.\n");
+            fclose(fp);
+            return;
+        }
+    }
+
+    if (fscanf(fp, "%d", &receivedChecksum) != 1)
+    {
+        printf("Error: Missing checksum.\n");
+        fclose(fp);
+        return;
+    }
+
+    fclose(fp);
+
+    printf("\n---- Received Packet ----\n");
+    printf("Words   : ");
+    for (i = 0; i < receivedCount; i++)
+        printf("%d ", receivedWords[i]);
+    printf("\n");
+    printf("Checksum: %d\n", receivedChecksum);
+
+    sum = 0;
+    for (i = 0; i < receivedCount; i++)
+        sum += receivedWords[i];
+    sum += receivedChecksum;
+
+    printf("\nIntermediate Sum (words + checksum): %d\n", sum);
+
+    while (sum > MAX_CHECKSUM)
+    {
+        carry = sum >> BLOCK_SIZE;
+        sum = (sum & MAX_CHECKSUM) + carry;
+        printf("End Around Carry applied -> Sum: %d\n", sum);
+    }
+
+    printf("Final Result: %d\n", sum);
+
+    printSeparator();
+    if (sum == MAX_CHECKSUM)
+        printf("VERIFICATION RESULT: NO ERROR DETECTED\n");
+    else
+        printf("VERIFICATION RESULT: ERROR DETECTED\n");
+    printSeparator();
+}
+
+#include <stdio.h>
+#include "sum.h"
+
+int main(void)
+{
+    Packet sentPacket;
+    int choice;
+
+    printSeparator();
+    printf("CHECKSUM ERROR DETECTION\n");
+    printSeparator();
+
+    do
+    {
+        printf("\n======== CHECKSUM ========\n");
+        printf("1. Sender\n");
+        printf("2. Receiver\n");
+        printf("3. Exit\n");
+        choice = readInt("Enter your choice (1-3): ", 1, 3);
+
+        switch (choice)
+        {
+            case 1:
+                printf("\n---- SENDER SIDE ----\n");
+                createPacket(&sentPacket);
+                generateChecksum(&sentPacket);
+                printf("\nPacket Sent Successfully!\n");
+                displayPacket(&sentPacket);
+                writePacketToFile(&sentPacket);
+                break;
+
+            case 2:
+                checkChecksum(&sentPacket);
+                break;
+
+            case 3:
+                printf("\nExiting program. Goodbye!\n");
+                break;
+        }
+    } while (choice != 3);
+
+    return 0;
+}
