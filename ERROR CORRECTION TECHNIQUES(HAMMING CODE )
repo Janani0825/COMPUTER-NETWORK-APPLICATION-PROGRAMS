@@ -1,0 +1,191 @@
+#include <stdio.h>
+#include <math.h>
+#define MAX 50
+typedef struct
+{
+    int data[MAX];
+    int code[MAX];
+    int recv[MAX];
+    int m;
+    int r;
+    int totalBits;
+}Hamming;
+int  isPowerOfTwo(int pos);
+int  hamcalc(int code[], int pos, int totalBits);
+int  hamcode(int recv[], int pos, int totalBits);
+void printBits(int arr[], int totalBits);
+void sender(Hamming *);
+void receiver(Hamming *);
+
+#include "ham.h"
+int isPowerOfTwo(int pos)
+{
+    return (pos & (pos - 1)) == 0;
+}
+void printBits(int arr[], int totalBits)
+{
+    int i;
+
+    for(i = totalBits; i >= 1; i--)
+        printf("%d ", arr[i]);
+
+    printf("\n");
+}
+int hamcalc(int code[], int pos, int totalBits)
+{
+    int parity = 0;
+    int i, j;
+
+    printf("  P%d (position %2d) checks bits : ", pos, pos);
+
+    for(i = pos; i <= totalBits; i = i + 2 * pos)
+    {
+        for(j = i; j < i + pos && j <= totalBits; j++)
+        {
+            if(j != pos)
+            {
+                printf("b%d(%d) ", j, code[j]);
+                parity ^= code[j];
+            }
+        }
+    }
+    printf(" -> XOR result = %d\n", parity);
+    return parity;
+}
+int hamcode(int recv[], int pos, int totalBits)
+{
+    int parity = 0;
+    int i, j;
+    printf("  Check C%d (position %2d) covers bits : ", pos, pos);
+    for(i = pos; i <= totalBits; i = i + 2 * pos)
+    {
+        for(j = i; j < i + pos && j <= totalBits; j++)
+        {
+            printf("b%d(%d) ", j, recv[j]);
+            parity ^= recv[j];
+        }
+    }
+    printf(" -> XOR result = %d %s\n", parity,
+           parity ? "(mismatch)" : "(ok)");
+
+    return parity;
+}
+void sender(Hamming *h)
+{
+    int i, j = 0;
+    printf("Enter number of data bits : ");
+    scanf("%d", &h->m);
+    printf("Enter Data Bits :\n");
+    for(i = 0; i < h->m; i++)
+        scanf("%d", &h->data[i]);
+    h->r = 0;
+    printf("\n--- Step 1 : Finding Redundancy Bits (r) ---\n");
+    printf("Condition to satisfy : 2^r >= m + r + 1   (m = %d)\n", h->m);
+    while(pow(2, h->r) < (h->m + h->r + 1))
+    {
+        printf("  r = %d : 2^%d = %-3.0f  < m+r+1 = %d   -> not enough, try next r\n",h->r, h->r, pow(2, h->r), h->m + h->r + 1);
+        h->r++;
+    }
+    printf("  r = %d : 2^%d = %-3.0f  >= m+r+1 = %d   -> satisfied\n",h->r, h->r, pow(2, h->r), h->m + h->r + 1);
+    h->totalBits = h->m + h->r;
+    printf("\nRedundancy Bits (r) = %d\n", h->r);
+    printf("Total Code Length (m + r) = %d\n", h->totalBits);
+    for(i = 1; i <= h->totalBits; i++)
+        h->code[i] = 0;
+    j = 0;
+    for(i = h->totalBits; i >= 1; i--)
+    {
+        if(isPowerOfTwo(i))
+            h->code[i] = 0;
+        else
+            h->code[i] = h->data[j++];
+    }
+    printf("\n--- Step 2 : Placing Data Bits (parity slots marked P) ---\n");
+    for(i = h->totalBits; i >= 1; i--)
+        printf("%s ", isPowerOfTwo(i) ? "P" : "D");
+    printf("   <- position type\n");
+    printBits(h->code, h->totalBits);
+    printf("\n--- Step 3 : Computing Parity Bits (even parity) ---\n");
+    for(i = 0; i < h->r; i++)
+    {
+        int pos = pow(2, i);
+        h->code[pos] = hamcalc(h->code, pos, h->totalBits);
+    }
+    printf("\nGenerated Hamming Code\n");
+    printBits(h->code, h->totalBits);
+}
+void receiver(Hamming *h)
+{
+    int i;
+    int error = 0;
+    printf("\nEnter Received Hamming Code (%d bits, highest position first)\n", h->totalBits);
+    for(i = h->totalBits; i >= 1; i--)
+        scanf("%d", &h->recv[i]);
+    printf("\n--- Recomputing Parity Checks ---\n");
+    for(i = 0; i < h->r; i++)
+    {
+        int pos = pow(2, i);
+
+        if(hamcode(h->recv, pos, h->totalBits))
+            error += pos;
+    }
+    printf("\nSyndrome (sum of mismatched check positions) = %d\n", error);
+    if(error == 0)
+    {
+        printf("\nNo Error Detected\n");
+    }
+    else
+    {
+        printf("\nError at Position = %d\n", error);
+
+        h->recv[error] = !h->recv[error];
+
+        printf("Bit %d flipped : %d -> %d\n",
+               error, !h->recv[error], h->recv[error]);
+
+        printf("\nCorrected Hamming Code\n");
+        printBits(h->recv, h->totalBits);
+    }
+}
+
+#include "ham.h"
+
+int main()
+{
+    Hamming h;
+    int choice;
+
+    while(1)
+    {
+        printf("\n");
+        printf("===================================\n");
+        printf("       HAMMING CODE PROGRAM\n");
+        printf("===================================\n");
+
+        printf("1. Sender\n");
+        printf("2. Receiver\n");
+        printf("3. Exit\n");
+
+        printf("Enter Choice : ");
+        scanf("%d",&choice);
+
+        switch(choice)
+        {
+            case 1:
+                sender(&h);
+                break;
+
+            case 2:
+                receiver(&h);
+                break;
+
+            case 3:
+                return 0;
+
+            default:
+                printf("Invalid Choice\n");
+        }
+    }
+
+    return 0;
+}
