@@ -1,0 +1,365 @@
+==========================================================
+LINK STATE ROUTING ALGORITHM
+==========================================================
+#ifndef DIJKSTRA_H
+#define DIJKSTRA_H
+
+#define MAX 20
+#define INF 9999
+
+struct Edge
+{
+    int source;
+    int destination;
+    int cost;
+};
+
+void dijkstra(struct Edge edges[], int n, int e, int source);
+
+#endif
+#include <stdio.h>
+#include "dij.h"
+
+void dijkstra(struct Edge edges[], int n, int e, int source)
+{
+    int dist[MAX];
+    int next[MAX];
+    int visited[MAX];
+
+    int i, j;
+    int pass;
+    int u, v;
+    int min;
+    for (i = 0; i < n; i++)
+    {
+        dist[i] = INF;
+        next[i] = -1;
+        visited[i] = 0;
+    }
+    dist[source] = 0;
+    visited[source] = 1;
+    for (i = 0; i < e; i++)
+    {
+        if (edges[i].source == source)
+        {
+            v = edges[i].destination;
+
+            if (edges[i].cost < dist[v])
+            {
+                dist[v] = edges[i].cost;
+                next[v] = v;
+            }
+        }
+    }
+    printf("\nINITIAL TABLE\n");
+    printf("---------------------------------------------\n");
+    printf("Source\tDestination\tCost\tNext Node\n");
+    printf("---------------------------------------------\n");
+
+    for (i = 0; i < n; i++)
+    {
+        if (i != source && dist[i] != INF)
+        {
+            printf("%c\t%c\t\t%d\t%c\n",
+                   'A' + source,
+                   'A' + i,
+                   dist[i],
+                   'A' + next[i]);
+        }
+    }
+    for (pass = 1; pass < n; pass++)
+    {
+        min = INF;
+        u = -1;
+        for (i = 0; i < n; i++)
+        {
+            if (!visited[i] && dist[i] < min)
+            {
+                min = dist[i];
+                u = i;
+            }
+        }
+
+        if (u == -1)
+            break;
+        visited[u] = 1;
+        for (i = 0; i < e; i++)
+        {
+            if (edges[i].source == u)
+            {
+                v = edges[i].destination;
+
+                if (!visited[v] &&
+                    dist[u] + edges[i].cost < dist[v])
+                {
+                    dist[v] = dist[u] + edges[i].cost;
+                    if (u == source)
+                        next[v] = v;
+                    else
+                        next[v] = next[u];
+                }
+            }
+        }
+        printf("\nPASS %d\n", pass);
+        printf("Selected Node: %c\n", 'A' + u);
+        printf("---------------------------------------------\n");
+        printf("Source\tDestination\tCost\tNext Node\n");
+        printf("---------------------------------------------\n");
+
+        for (j = 0; j < n; j++)
+        {
+            if (j != source && dist[j] != INF)
+            {
+                printf("%c\t%c\t\t%d\t%c\n",
+                       'A' + source,
+                       'A' + j,
+                       dist[j],
+                       'A' + next[j]);
+            }
+        }
+    }
+    printf("=============================================\n");
+    printf("Source\tDestination\tCost\tNext Node\n");
+    printf("=============================================\n");
+
+    for (i = 0; i < n; i++)
+    {
+        if (i != source && dist[i] != INF)
+        {
+            printf("%c\t%c\t\t%d\t%c\n",
+                   'A' + source,
+                   'A' + i,
+                   dist[i],
+                   'A' + next[i]);
+        }
+    }
+}
+#include <stdio.h>
+#include "dij.h"
+
+int main()
+{
+    struct Edge edges[MAX];
+
+    int n, e;
+    int i;
+    char source, destination;
+    char start;
+
+    printf("Enter number of nodes: ");
+    scanf("%d", &n);
+
+    printf("Enter number of edges: ");
+    scanf("%d", &e);
+
+    printf("\nEnter edges as:\n");
+    printf("Source Destination Cost\n\n");
+
+    for (i = 0; i < e; i++)
+    {
+        scanf(" %c %c %d",
+              &source,
+              &destination,
+              &edges[i].cost);
+
+        edges[i].source = source - 'A';
+        edges[i].destination = destination - 'A';
+    }
+
+    printf("\nEnter source node: ");
+    scanf(" %c", &start);
+
+    dijkstra(edges, n, e, start - 'A');
+
+    return 0;
+}
+=========================================================
+DISTANCE VECTOR ROUTING ALGORITHM
+=========================================================
+#ifndef BELLMANFORD_H
+#define BELLMANFORD_H
+
+#define MAX_NODES 20
+#define MAX_EDGES 100
+#define INF 9999
+
+struct Edge
+{
+    int source;
+    int destination;
+    int cost;
+};
+#include <stdio.h>
+#include "bellman.h"
+
+void printTable(int n, int source, int dist[], int next[])
+{
+    int i;
+
+    printf("---------------------------------------------\n");
+    printf("Source\tDestination\tCost\tNext Node\n");
+    printf("---------------------------------------------\n");
+
+    for (i = 0; i < n; i++)
+    {
+        if (i == source)
+        {
+            printf("%c\t%c\t\t0\t-\n",
+                   'A' + source,
+                   'A' + i);
+        }
+        else if (dist[i] == INF)
+        {
+            printf("%c\t%c\t\tINF\t-\n",
+                   'A' + source,
+                   'A' + i);
+        }
+        else
+        {
+            printf("%c\t%c\t\t%d\t%c\n",
+                   'A' + source,
+                   'A' + i,
+                   dist[i],
+                   'A' + next[i]);
+        }
+    }
+}
+
+void bellmanFord(struct Edge edges[], int n, int e, int source)
+{
+    int dist[MAX_NODES];
+    int oldDist[MAX_NODES];
+
+    int next[MAX_NODES];
+    int oldNext[MAX_NODES];
+
+    int i, j;
+    int u, v;
+    int negativeCycle = 0;
+    for (i = 0; i < n; i++)
+    {
+        dist[i] = INF;
+        next[i] = -1;
+    }
+
+    dist[source] = 0;
+
+    printf("\nINITIAL TABLE\n");
+    printTable(n, source, dist, next);
+
+
+    for (i = 1; i <= n - 1; i++)
+    {
+
+        for (j = 0; j < n; j++)
+        {
+            oldDist[j] = dist[j];
+            oldNext[j] = next[j];
+        }
+
+
+        for (j = 0; j < e; j++)
+        {
+            u = edges[j].source;
+            v = edges[j].destination;
+
+            if (oldDist[u] != INF &&
+                oldDist[u] + edges[j].cost < dist[v])
+            {
+                dist[v] = oldDist[u] + edges[j].cost;
+
+                if (u == source)
+                {
+                    next[v] = v;
+                }
+                else
+                {
+                    next[v] = oldNext[u];
+                }
+            }
+        }
+
+        printf("\nPASS %d\n", i);
+        printTable(n, source, dist, next);
+    }
+
+    for (j = 0; j < e; j++)
+    {
+        u = edges[j].source;
+        v = edges[j].destination;
+
+        if (dist[u] != INF &&
+            dist[u] + edges[j].cost < dist[v])
+        {
+            negativeCycle = 1;
+            break;
+        }
+    }
+    if (negativeCycle)
+    {
+        printf("\n");
+        printf("=============================================\n");
+        printf("NEGATIVE WEIGHT CYCLE DETECTED!\n");
+        printf("=============================================\n");
+
+        printf("\nShortest paths cannot be determined.\n");
+
+        return;
+    }
+    printf("\nFINAL ROUTING TABLE\n");
+    printTable(n, source, dist, next);
+}
+#include <stdio.h>
+#include "bellman.h"
+
+int main()
+{
+    struct Edge edges[MAX_EDGES];
+
+    int n, e;
+    int i;
+    int edgeCount = 0;
+
+    char source;
+    char destination;
+    char start;
+
+    int cost;
+
+    printf("Enter number of nodes: ");
+    scanf("%d", &n);
+
+    printf("Enter number of edges: ");
+    scanf("%d", &e);
+
+    printf("\nEnter edges as:\n");
+    printf("Source Destination Cost\n\n");
+
+    for (i = 0; i < e; i++)
+    {
+        scanf(" %c %c %d",
+              &source,
+              &destination,
+              &cost);
+
+
+        edges[edgeCount].source = source - 'A';
+        edges[edgeCount].destination = destination - 'A';
+        edges[edgeCount].cost = cost;
+
+        edgeCount++;
+
+        edges[edgeCount].source = destination - 'A';
+        edges[edgeCount].destination = source - 'A';
+        edges[edgeCount].cost = cost;
+
+        edgeCount++;
+    }
+
+    printf("\nEnter source node: ");
+    scanf(" %c", &start);
+
+    bellmanFord(edges, n, edgeCount, start - 'A');
+
+    return 0;
+}
