@@ -1,0 +1,184 @@
+-----------------------------------
+server.c
+-----------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+
+#define PORT 8084
+#define BUFFER_SIZE 1024
+
+void handle_client(int client_fd) {
+    char buf[BUFFER_SIZE];
+    fd_set readfds;
+    int n;
+
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        FD_SET(client_fd, &readfds);
+
+        if (select(client_fd + 1, &readfds, NULL, NULL, NULL) < 0)
+            break;
+
+        if (FD_ISSET(client_fd, &readfds)) {
+            n = recv(client_fd, buf, sizeof(buf) - 1, 0);
+            if (n <= 0)
+                break;
+
+            buf[n] = '\0';
+            printf("\n[Client]: %s", buf);
+            fflush(stdout);
+
+            if (strncmp(buf, "exit", 4) == 0)
+                break;
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(buf, sizeof(buf), stdin) == NULL)
+                break;
+
+            if (send(client_fd, buf, strlen(buf), 0) <= 0)
+                break;
+
+            if (strncmp(buf, "exit", 4) == 0)
+                break;
+        }
+    }
+
+    close(client_fd);
+    printf("\nClient disconnected.\n");
+}
+
+int main(void) {
+    int server_fd, client_fd, opt = 1;
+    struct sockaddr_in address;
+    socklen_t addrlen;
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind");
+        close(server_fd);
+        return 1;
+    }
+
+    if (listen(server_fd, 5) < 0) {
+        perror("listen");
+        close(server_fd);
+        return 1;
+    }
+
+    printf("Iterative Server listening on port %d...\n", PORT);
+
+    while (1) {
+        printf("\nWaiting for a client connection...\n");
+        fflush(stdout);
+
+        addrlen = sizeof(address);
+        client_fd = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+
+        if (client_fd < 0) {
+            perror("accept");
+            continue;
+        }
+
+        printf("Client connected! Type messages; type 'exit' to end.\n");
+        handle_client(client_fd);
+    }
+
+    close(server_fd);
+    return 0;
+}
+-----------------------------------
+client.c
+-----------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+
+#define PORT 8084
+#define BUFFER_SIZE 1024
+
+int main(void) {
+    int sockfd, n;
+    struct sockaddr_in serv_addr;
+    char buf[BUFFER_SIZE];
+    fd_set readfds;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("connect");
+        close(sockfd);
+        return 1;
+    }
+
+    printf("Connected to server! Type 'exit' to leave.\n");
+
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        FD_SET(sockfd, &readfds);
+
+        if (select(sockfd + 1, &readfds, NULL, NULL, NULL) < 0)
+            break;
+
+        if (FD_ISSET(sockfd, &readfds)) {
+            n = recv(sockfd, buf, sizeof(buf) - 1, 0);
+            if (n <= 0)
+                break;
+
+            buf[n] = '\0';
+            printf("[Server]: %s", buf);
+            fflush(stdout);
+
+            if (strncmp(buf, "exit", 4) == 0)
+                break;
+        }
+
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(buf, sizeof(buf), stdin) == NULL)
+                break;
+
+            if (send(sockfd, buf, strlen(buf), 0) <= 0)
+                break;
+
+            if (strncmp(buf, "exit", 4) == 0)
+                break;
+        }
+    }
+
+    close(sockfd);
+    printf("\nDisconnected from server.\n");
+    return 0;
+}
+
