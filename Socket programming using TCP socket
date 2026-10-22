@@ -1,0 +1,154 @@
+-------------------------------
+sever.c
+-------------------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int server, client;
+    struct sockaddr_in addr;
+    char msg[100];
+
+    server = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (server < 0)
+    {
+        printf("Socket creation failed\n");
+        return 1;
+    }
+
+    printf("Socket created successfully\n");
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(1234);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(server, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        printf("Bind failed\n");
+        close(server);
+        return 1;
+    }
+
+    printf("Bind successful\n");
+
+    if (listen(server, 1) < 0)
+    {
+        printf("Listen failed\n");
+        close(server);
+        return 1;
+    }
+
+    printf("Server is listening...\n");
+    printf("Waiting for client...\n");
+
+    client = accept(server, NULL, NULL);
+
+    if (client < 0)
+    {
+        printf("Client connection failed\n");
+        close(server);
+        return 1;
+    }
+
+    printf("Client connected successfully\n");
+
+    if (recv(client, msg, sizeof(msg), 0) <= 0)
+    {
+        printf("Message receiving failed\n");
+        close(client);
+        close(server);
+        return 1;
+    }
+
+    printf("Client: %s\n", msg);
+
+    printf("Enter reply: ");
+    fgets(msg, sizeof(msg), stdin);
+    msg[strcspn(msg, "\n")] = '\0';
+
+    if (send(client, msg, strlen(msg) + 1, 0) < 0)
+    {
+        printf("Message sending failed\n");
+    }
+    else
+    {
+        printf("Message sent successfully\n");
+    }
+
+    close(client);
+    close(server);
+
+    printf("Connection closed\n");
+
+    return 0;
+}
+---------------------------------------
+client.c
+---------------------------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int client;
+    struct sockaddr_in addr;
+    char msg[100];
+
+    client = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (client < 0)
+    {
+        printf("Socket creation failed\n");
+        return 1;
+    }
+
+    printf("Socket created successfully\n");
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(1234);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(client, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        printf("Connection failed\n");
+        close(client);
+        return 1;
+    }
+
+    printf("Connected to server successfully\n");
+
+    printf("Enter message: ");
+    fgets(msg, sizeof(msg), stdin);
+    msg[strcspn(msg, "\n")] = '\0';
+
+    if (send(client, msg, strlen(msg) + 1, 0) < 0)
+    {
+        printf("Message sending failed\n");
+        close(client);
+        return 1;
+    }
+
+    printf("Message sent successfully\n");
+
+    if (recv(client, msg, sizeof(msg), 0) <= 0)
+    {
+        printf("Message receiving failed\n");
+        close(client);
+        return 1;
+    }
+
+    printf("Server: %s\n", msg);
+    printf("Message received successfully\n");
+
+    close(client);
+
+    printf("Connection closed\n");
+
+    return 0;
+}
