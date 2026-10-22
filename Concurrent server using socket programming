@@ -1,0 +1,235 @@
+---------------------------------
+server
+-----------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+int main()
+{
+    int s, c, n;
+    char op, buffer[1024], filename[256];
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+    FILE *fp;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(4800);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    // Reuse address to avoid "Address already in use" errors
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    if (bind(s, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        perror("Bind failed");
+        return 1;
+    }
+    listen(s, 5);
+
+    printf("Server waiting for clients...\n");
+
+    while (1)
+    {
+        c = accept(s, (struct sockaddr *)&client, &len);
+
+        if (c < 0)
+            continue;
+
+        if (fork() == 0)
+        {
+            close(s);
+
+            // 1. Receive Operation Code
+            if (recv(c, &op, 1, 0) <= 0)
+            {
+                close(c);
+                exit(1);
+            }
+
+            // 2. Receive Filename length first, then the string
+            int name_len = 0;
+            if (recv(c, &name_len, sizeof(name_len), 0) <= 0) {
+                close(c);
+                exit(1);
+            }
+            if (recv(c, filename, name_len, 0) <= 0) {
+                close(c);
+                exit(1);
+            }
+            filename[name_len] = '\0'; // Null-terminate string
+
+            if (op == '1')
+            {
+                /* STORE: receive file content */
+                fp = fopen(filename, "wb");
+                if (fp == NULL)
+                {
+                    perror("File open error on server");
+                    close(c);
+                    exit(1);
+                }
+
+                while ((n = recv(c, buffer, sizeof(buffer), 0)) > 0)
+                    fwrite(buffer, 1, n, fp);
+
+                fclose(fp);
+                printf("File '%s' stored successfully.\n", filename);
+            }
+            else if (op == '2')
+            {
+                /* RETRIEVE: send file content to client */
+                fp = fopen(filename, "rb");
+
+                if (fp == NULL)
+                {
+                    send(c, "0", 1, 0); // File not found status
+                }
+                else
+                {
+                    send(c, "1", 1, 0); // File exists status
+
+                    while ((n = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+                        send(c, buffer, n, 0);
+
+                    fclose(fp);
+                    printf("File '%s' retrieved successfully.\n", filename);
+                }
+            }
+
+            close(c);
+            exit(0);
+        }
+
+        close(c);
+        waitpid(-1, NULL, WNOHANG);
+    }
+
+    close(s);
+    return 0;
+}
+----------------------------------
+client
+------------------------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+int main()
+{
+    int s, n, choice;
+    char op, buffer[1024], status, filename[256];
+    struct sockaddr_in server;
+    FILE *fp;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(4800);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(s, (struct sockaddr *)&server, sizeof(server)) < 0)
+    {
+        perror("Connection failed");
+        close(s);
+        return 1;
+    }
+
+    printf("1. Store file\n");
+    printf("2. Retrieve file\n");
+    printf("Enter choice: ");
+    scanf("%d", &choice);
+    getchar(); // Clear the newline character from the buffer
+
+    if (choice == 1)
+    {
+        op = '1';
+        printf("Enter the local filename to send: ");
+        scanf("%255s", filename);
+
+        fp = fopen(filename, "rb");
+        if (fp == NULL)
+        {
+            printf("Source file not found.\n");
+            close(s);
+            return 1;
+        }
+
+        // 1. Send operation code
+        send(s, &op, 1, 0);
+
+        // 2. Send filename meta (length + content)
+        int name_len = strlen(filename);
+        send(s, &name_len, sizeof(name_len), 0);
+        send(s, filename, name_len, 0);
+
+        // 3. Send file payload
+        while ((n = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+            send(s, buffer, n, 0);
+
+        fclose(fp);
+        shutdown(s, SHUT_WR); // Tell server file writing is finished
+
+        printf("File sent to server for storage.\n");
+    }
+    else if (choice == 2)
+    {
+        op = '2';
+        printf("Enter the filename to retrieve from server: ");
+        scanf("%255s", filename);
+
+        // 1. Send operation code
+        send(s, &op, 1, 0);
+
+        // 2. Send filename meta (length + content)
+        int name_len = strlen(filename);
+        send(s, &name_len, sizeof(name_len), 0);
+        send(s, filename, name_len, 0);
+
+        // 3. Read status byte from server
+        if (recv(s, &status, 1, MSG_WAITALL) <= 0 || status == '0')
+        {
+            printf("File not found on server.\n");
+            close(s);
+            return 0;
+        }
+
+        // Ask user what they want to name the downloaded file locally
+        char out_filename[256];
+        printf("Enter local name to save as: ");
+        scanf("%255s", out_filename);
+
+        fp = fopen(out_filename, "wb");
+        if (fp == NULL)
+        {
+            perror("Cannot create output file");
+            close(s);
+            return 1;
+        }
+
+        // 4. Download file data
+        while ((n = recv(s, buffer, sizeof(buffer), 0)) > 0)
+            fwrite(buffer, 1, n, fp);
+
+        fclose(fp);
+        printf("File downloaded successfully as '%s'.\n", out_filename);
+    }
+    else
+    {
+        printf("Invalid choice.\n");
+    }
+
+    close(s);
+    return 0;
+}
+
